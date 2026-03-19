@@ -9,15 +9,18 @@ Orchestrator coordinates, not executes. Each subagent loads the full execute-pla
 <runtime_compatibility>
 **Subagent spawning is runtime-specific:**
 - **Claude Code:** Uses `Task(subagent_type="gsd-executor", ...)` — blocks until complete, returns result
-- **Copilot:** Uses `@gsd-executor` agent reference — if subagent spawning hangs or fails to return,
-  fall back to **sequential inline execution**: read and follow execute-plan.md directly for each plan
-  instead of spawning parallel agents. This is slower but reliable.
+- **Copilot:** Subagent spawning does not reliably return completion signals. **Default to
+  sequential inline execution**: read and follow execute-plan.md directly for each plan
+  instead of spawning parallel agents. Only attempt parallel spawning if the user
+  explicitly requests it — and in that case, rely on the spot-check fallback in step 3
+  to detect completion.
 - **Other runtimes (Gemini, Codex, OpenCode):** If Task/subagent API is unavailable, use sequential
   inline execution as the fallback.
 
 **Fallback rule:** If a spawned agent completes its work (commits visible, SUMMARY.md exists) but
 the orchestrator never receives the completion signal, treat it as successful based on spot-checks
-and continue to the next wave/plan.
+and continue to the next wave/plan. Never block indefinitely waiting for a signal — always verify
+via filesystem and git state.
 </runtime_compatibility>
 
 <required_reading>
@@ -59,6 +62,14 @@ Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelizat
 **If `state_exists` is false but `.planning/` exists:** Offer reconstruct or continue.
 
 When `parallelization` is false, plans within a wave execute sequentially.
+
+**Runtime detection for Copilot:**
+Check if the current runtime is Copilot by testing for the `@gsd-executor` agent pattern
+or absence of the `Task()` subagent API. If running under Copilot, force sequential inline
+execution regardless of the `parallelization` setting — Copilot's subagent completion
+signals are unreliable (see `<runtime_compatibility>`). Set `COPILOT_SEQUENTIAL=true`
+internally and skip the `execute_waves` step in favor of `check_interactive_mode`'s
+inline path for each plan.
 
 **REQUIRED — Sync chain flag with intent.** If user invoked manually (no `--auto`), clear the ephemeral chain flag from any previous interrupted `--auto` chain. This prevents stale `_auto_chain_active: true` from causing unwanted auto-advance. This does NOT touch `workflow.auto_advance` (the user's persistent settings preference). You MUST execute this bash block before any config reads:
 ```bash
@@ -249,6 +260,28 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    ```
 
 3. **Wait for all agents in wave to complete.**
+
+   **Completion signal fallback (Copilot and runtimes where Task() may not return):**
+
+   If a spawned agent does not return a completion signal but appears to have finished
+   its work, do NOT block indefinitely. Instead, verify completion via spot-checks:
+
+   ```bash
+   # For each plan in this wave, check if the executor finished:
+   SUMMARY_EXISTS=$(test -f "{phase_dir}/{plan_number}-{plan_padded}-SUMMARY.md" && echo "true" || echo "false")
+   COMMITS_FOUND=$(git log --oneline --all --grep="{phase_number}-{plan_padded}" --since="1 hour ago" | head -1)
+   ```
+
+   **If SUMMARY.md exists AND commits are found:** The agent completed successfully —
+   treat as done and proceed to step 4. Log: `"✓ {Plan ID} completed (verified via spot-check — completion signal not received)"`
+
+   **If SUMMARY.md does NOT exist after a reasonable wait:** The agent may still be
+   running or may have failed silently. Check `git log --oneline -5` for recent
+   activity. If commits are still appearing, wait longer. If no activity, report
+   the plan as failed and route to the failure handler in step 5.
+
+   **This fallback applies automatically to all runtimes.** Claude Code's Task() normally
+   returns synchronously, but the fallback ensures resilience if it doesn't.
 
 4. **Post-wave hook validation (parallel mode only):**
 
