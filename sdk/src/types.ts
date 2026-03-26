@@ -194,6 +194,8 @@ export enum GSDEventType {
   PhaseComplete = 'phase_complete',
   WaveStart = 'wave_start',
   WaveComplete = 'wave_complete',
+  MilestoneStart = 'milestone_start',
+  MilestoneComplete = 'milestone_complete',
 }
 
 /**
@@ -459,6 +461,65 @@ export interface GSDWaveCompleteEvent extends GSDEventBase {
   durationMs: number;
 }
 
+// ─── S05: Milestone-level types ──────────────────────────────────────────────
+
+/**
+ * Single phase entry from `gsd-tools.cjs roadmap analyze`.
+ */
+export interface RoadmapPhaseInfo {
+  number: string;
+  disk_status: string;
+  roadmap_complete: boolean;
+  phase_name: string;
+}
+
+/**
+ * Structured output from `gsd-tools.cjs roadmap analyze`.
+ */
+export interface RoadmapAnalysis {
+  phases: RoadmapPhaseInfo[];
+  [key: string]: unknown;
+}
+
+/**
+ * Options for configuring a milestone-level run (multi-phase orchestration).
+ * Superset of PhaseRunnerOptions so phase-level callbacks pass through.
+ */
+export interface MilestoneRunnerOptions extends PhaseRunnerOptions {
+  /** Called after each phase completes. Return 'stop' to halt milestone execution. */
+  onPhaseComplete?: (result: PhaseRunnerResult, phaseInfo: RoadmapPhaseInfo) => Promise<void | 'stop'>;
+}
+
+/**
+ * Result of a full milestone run (all phases).
+ */
+export interface MilestoneRunnerResult {
+  success: boolean;
+  phases: PhaseRunnerResult[];
+  totalCostUsd: number;
+  totalDurationMs: number;
+}
+
+/**
+ * Milestone execution started.
+ */
+export interface GSDMilestoneStartEvent extends GSDEventBase {
+  type: GSDEventType.MilestoneStart;
+  phaseCount: number;
+  prompt: string;
+}
+
+/**
+ * Milestone execution completed.
+ */
+export interface GSDMilestoneCompleteEvent extends GSDEventBase {
+  type: GSDEventType.MilestoneComplete;
+  success: boolean;
+  totalCostUsd: number;
+  totalDurationMs: number;
+  phasesCompleted: number;
+}
+
 /**
  * Discriminated union of all GSD events.
  */
@@ -484,7 +545,9 @@ export type GSDEvent =
   | GSDPhaseStepCompleteEvent
   | GSDPhaseCompleteEvent
   | GSDWaveStartEvent
-  | GSDWaveCompleteEvent;
+  | GSDWaveCompleteEvent
+  | GSDMilestoneStartEvent
+  | GSDMilestoneCompleteEvent;
 
 /**
  * Transport handler interface for consuming GSD events.

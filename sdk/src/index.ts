@@ -23,7 +23,8 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-import type { GSDOptions, PlanResult, SessionOptions, GSDEvent, TransportHandler, PhaseRunnerOptions, PhaseRunnerResult } from './types.js';
+import type { GSDOptions, PlanResult, SessionOptions, GSDEvent, TransportHandler, PhaseRunnerOptions, PhaseRunnerResult, MilestoneRunnerOptions, MilestoneRunnerResult, RoadmapPhaseInfo } from './types.js';
+import { GSDEventType } from './types.js';
 import { parsePlan, parsePlanFile } from './plan-parser.js';
 import { loadConfig } from './config.js';
 import { GSDTools } from './gsd-tools.js';
@@ -144,6 +145,106 @@ export class GSD {
     });
 
     return runner.run(phaseNumber, options);
+  }
+
+  /**
+   * Run a full milestone: discover phases, execute each incomplete one in order,
+   * re-discover after each completion to catch dynamically inserted phases.
+   *
+   * @param prompt - The user prompt describing the milestone goal
+   * @param options - Per-milestone overrides for budget, turns, model, and callbacks
+   * @returns MilestoneRunnerResult with per-phase results, overall success, cost, and timing
+   */
+  async run(prompt: string, options?: MilestoneRunnerOptions): Promise<MilestoneRunnerResult> {
+    const tools = this.createTools();
+    const startTime = Date.now();
+    const phaseResults: PhaseRunnerResult[] = [];
+    let success = true;
+
+    // Discover initial phases
+    const initialAnalysis = await tools.roadmapAnalyze();
+    const incompletePhases = this.filterAndSortPhases(initialAnalysis.phases);
+
+    // Emit MilestoneStart
+    this.eventStream.emitEvent({
+      type: GSDEventType.MilestoneStart,
+      timestamp: new Date().toISOString(),
+      sessionId: `milestone-${Date.now()}`,
+      phaseCount: incompletePhases.length,
+      prompt,
+    });
+
+    // Loop through phases, re-discovering after each completion
+    let currentPhases = incompletePhases;
+
+    while (currentPhases.length > 0) {
+      const phase = currentPhases[0];
+
+      try {
+        const result = await this.runPhase(phase.number, options);
+        phaseResults.push(result);
+
+        if (!result.success) {
+          success = false;
+          break;
+        }
+
+        // Notify callback if present; stop if requested
+        if (options?.onPhaseComplete) {
+          const verdict = await options.onPhaseComplete(result, phase);
+          if (verdict === 'stop') {
+            break;
+          }
+        }
+
+        // Re-discover phases to catch dynamically inserted ones
+        const updatedAnalysis = await tools.roadmapAnalyze();
+        currentPhases = this.filterAndSortPhases(updatedAnalysis.phases);
+      } catch (err) {
+        // Phase threw an unexpected error — record as failure and stop
+        phaseResults.push({
+          phaseNumber: phase.number,
+          phaseName: phase.phase_name,
+          steps: [],
+          success: false,
+          totalCostUsd: 0,
+          totalDurationMs: 0,
+        });
+        success = false;
+        break;
+      }
+    }
+
+    const totalCostUsd = phaseResults.reduce((sum, r) => sum + r.totalCostUsd, 0);
+    const totalDurationMs = Date.now() - startTime;
+
+    // Emit MilestoneComplete
+    this.eventStream.emitEvent({
+      type: GSDEventType.MilestoneComplete,
+      timestamp: new Date().toISOString(),
+      sessionId: `milestone-${Date.now()}`,
+      success,
+      totalCostUsd,
+      totalDurationMs,
+      phasesCompleted: phaseResults.filter(r => r.success).length,
+    });
+
+    return {
+      success,
+      phases: phaseResults,
+      totalCostUsd,
+      totalDurationMs,
+    };
+  }
+
+  /**
+   * Filter to incomplete phases and sort numerically.
+   * Uses parseFloat to handle decimal phase numbers (e.g. '5.1').
+   */
+  private filterAndSortPhases(phases: RoadmapPhaseInfo[]): RoadmapPhaseInfo[] {
+    return phases
+      .filter(p => !p.roadmap_complete)
+      .sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
   }
 
   /**

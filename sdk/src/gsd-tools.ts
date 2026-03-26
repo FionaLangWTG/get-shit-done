@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { PhaseOpInfo, PhasePlanIndex } from './types.js';
+import type { PhaseOpInfo, PhasePlanIndex, RoadmapAnalysis } from './types.js';
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -156,8 +156,8 @@ export class GSDTools {
     return this.exec('state', ['load']);
   }
 
-  async roadmapAnalyze(): Promise<unknown> {
-    return this.exec('roadmap', ['analyze']);
+  async roadmapAnalyze(): Promise<RoadmapAnalysis> {
+    return this.exec('roadmap', ['analyze']) as Promise<RoadmapAnalysis>;
   }
 
   async phaseComplete(phase: string): Promise<unknown> {
