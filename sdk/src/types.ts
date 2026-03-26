@@ -84,3 +84,72 @@ export interface ParsedPlan {
   tasks: PlanTask[];
   raw: string;
 }
+
+// ─── Session & execution types ───────────────────────────────────────────────
+
+/**
+ * Options for configuring a single plan execution session.
+ */
+export interface SessionOptions {
+  /** Maximum agentic turns before stopping. Default: 50. */
+  maxTurns?: number;
+  /** Maximum budget in USD. Default: 5.0. */
+  maxBudgetUsd?: number;
+  /** Model ID to use (e.g., 'claude-sonnet-4-6'). Falls back to config model_profile. */
+  model?: string;
+  /** Working directory for the session. */
+  cwd?: string;
+  /** Allowed tool names. Default: ['Read','Write','Edit','Bash','Grep','Glob']. */
+  allowedTools?: string[];
+}
+
+/**
+ * Usage statistics from a completed session.
+ */
+export interface SessionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+/**
+ * Result of a plan execution session.
+ */
+export interface PlanResult {
+  /** Whether the plan completed successfully. */
+  success: boolean;
+  /** Session UUID for audit trail. */
+  sessionId: string;
+  /** Total cost in USD. */
+  totalCostUsd: number;
+  /** Total wall-clock duration in milliseconds. */
+  durationMs: number;
+  /** Token usage breakdown. */
+  usage: SessionUsage;
+  /** Number of agentic turns used. */
+  numTurns: number;
+  /** Error details when success is false. */
+  error?: {
+    /** Error subtype from SDK result (e.g., 'error_max_turns', 'error_during_execution'). */
+    subtype: string;
+    /** Error messages. */
+    messages: string[];
+  };
+}
+
+/**
+ * Options for creating a GSD instance.
+ */
+export interface GSDOptions {
+  /** Root directory of the project. */
+  projectDir: string;
+  /** Path to gsd-tools.cjs. Falls back to ~/.claude/get-shit-done/bin/gsd-tools.cjs. */
+  gsdToolsPath?: string;
+  /** Model to use for execution sessions. */
+  model?: string;
+  /** Maximum budget per plan execution in USD. Default: 5.0. */
+  maxBudgetUsd?: number;
+  /** Maximum turns per plan execution. Default: 50. */
+  maxTurns?: number;
+}
