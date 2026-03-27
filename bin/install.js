@@ -67,9 +67,9 @@ const hasCopilot = args.includes('--copilot');
 const hasAntigravity = args.includes('--antigravity');
 const hasCursor = args.includes('--cursor');
 const hasWindsurf = args.includes('--windsurf');
+const hasSdk = args.includes('--sdk');
 const hasBoth = args.includes('--both'); // Legacy flag, keeps working
 const hasAll = args.includes('--all');
-const hasSdk = args.includes('--sdk');
 const hasUninstall = args.includes('--uninstall') || args.includes('-u');
 
 // Runtime selection - can be set by flags or interactive prompt
@@ -4695,11 +4695,12 @@ function handleStatusline(settings, isInteractive, callback) {
  * @returns {boolean} true if install succeeded
  */
 function installSdk() {
-  const sdkPkg = '@gsd-build/sdk@latest';
+  const sdkVersion = pkg.version;
+  const sdkPkg = `@gsd-build/sdk@${sdkVersion}`;
   console.log(`\n  ${cyan}Installing GSD SDK...${reset}`);
   console.log(`  ${dim}npm install -g ${sdkPkg}${reset}\n`);
   try {
-    require('child_process').execSync(`npm install -g --force --no-fund --loglevel=error ${sdkPkg}`, { stdio: 'pipe' });
+    require('child_process').execSync(`npm install -g ${sdkPkg}`, { stdio: 'inherit' });
     console.log(`\n  ${green}✓${reset} GSD SDK installed (${cyan}gsd-sdk${reset} command available)`);
     return true;
   } catch (e) {
@@ -4883,39 +4884,39 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
   const primaryStatuslineResult = results.find(r => statuslineRuntimes.includes(r.runtime));
 
   const finalize = (shouldInstallStatusline) => {
-    for (const result of results) {
-      const useStatusline = statuslineRuntimes.includes(result.runtime) && shouldInstallStatusline;
-      finishInstall(
-        result.settingsPath,
-        result.settings,
-        result.statuslineCommand,
-        useStatusline,
-        result.runtime,
-        isGlobal
-      );
-    }
-  };
+    // Handle SDK installation before printing final summaries
+    const printSummaries = () => {
+      for (const result of results) {
+        const useStatusline = statuslineRuntimes.includes(result.runtime) && shouldInstallStatusline;
+        finishInstall(
+          result.settingsPath,
+          result.settings,
+          result.statuslineCommand,
+          useStatusline,
+          result.runtime,
+          isGlobal
+        );
+      }
+    };
 
-  const afterFinalize = () => {
     if (hasSdk) {
       // --sdk flag: install without prompting
       installSdk();
+      printSummaries();
     } else if (isInteractive) {
       promptSdk((wantsSdk) => {
         if (wantsSdk) installSdk();
+        printSummaries();
       });
+    } else {
+      printSummaries();
     }
   };
 
-  const finalizeAndSdk = (shouldInstallStatusline) => {
-    finalize(shouldInstallStatusline);
-    afterFinalize();
-  };
-
   if (primaryStatuslineResult) {
-    handleStatusline(primaryStatuslineResult.settings, isInteractive, finalizeAndSdk);
+    handleStatusline(primaryStatuslineResult.settings, isInteractive, finalize);
   } else {
-    finalizeAndSdk(false);
+    finalize(false);
   }
 }
 
