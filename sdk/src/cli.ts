@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { GSD } from './index.js';
 import { CLITransport } from './cli-transport.js';
 import { WSTransport } from './ws-transport.js';
+import { InitRunner } from './init-runner.js';
 
 // ─── Parsed CLI args ─────────────────────────────────────────────────────────
 
@@ -200,16 +201,83 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  // ─── Init command (input resolution only; InitRunner wiring is T03) ────────
+  // ─── Init command ─────────────────────────────────────────────────────────
   if (args.command === 'init') {
+    let input: string;
     try {
-      const input = await resolveInitInput(args);
-      console.log(`[init] Resolved input: ${input.length} chars`);
-      // TODO(T03): Wire InitRunner here
-      console.log('[init] InitRunner not yet implemented — input resolved successfully.');
+      input = await resolveInitInput(args);
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       process.exitCode = 1;
+      return;
+    }
+
+    console.log(`[init] Resolved input: ${input.length} chars`);
+
+    // Build GSD instance for tools and event stream
+    const gsd = new GSD({
+      projectDir: args.projectDir,
+      model: args.model,
+      maxBudgetUsd: args.maxBudget,
+    });
+
+    // Wire CLI transport
+    const cliTransport = new CLITransport();
+    gsd.addTransport(cliTransport);
+
+    // Optional WebSocket transport
+    let wsTransport: WSTransport | undefined;
+    if (args.wsPort !== undefined) {
+      wsTransport = new WSTransport({ port: args.wsPort });
+      await wsTransport.start();
+      gsd.addTransport(wsTransport);
+      console.log(`WebSocket transport listening on port ${args.wsPort}`);
+    }
+
+    try {
+      const tools = gsd.createTools();
+      const runner = new InitRunner({
+        projectDir: args.projectDir,
+        tools,
+        eventStream: gsd.eventStream,
+        config: {
+          maxBudgetPerSession: args.maxBudget,
+          orchestratorModel: args.model,
+        },
+      });
+
+      const result = await runner.run(input);
+
+      // Print completion summary
+      const status = result.success ? 'SUCCESS' : 'FAILED';
+      const stepCount = result.steps.length;
+      const passedSteps = result.steps.filter(s => s.success).length;
+      const cost = result.totalCostUsd.toFixed(2);
+      const duration = (result.totalDurationMs / 1000).toFixed(1);
+      const artifactList = result.artifacts.join(', ');
+
+      console.log(`\n[${status}] ${passedSteps}/${stepCount} steps, $${cost}, ${duration}s`);
+      if (result.artifacts.length > 0) {
+        console.log(`Artifacts: ${artifactList}`);
+      }
+
+      if (!result.success) {
+        // Log failed steps
+        for (const step of result.steps) {
+          if (!step.success && step.error) {
+            console.error(`  ✗ ${step.step}: ${step.error}`);
+          }
+        }
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(`Fatal error: ${(err as Error).message}`);
+      process.exitCode = 1;
+    } finally {
+      cliTransport.close();
+      if (wsTransport) {
+        wsTransport.close();
+      }
     }
     return;
   }

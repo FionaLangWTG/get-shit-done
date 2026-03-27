@@ -222,4 +222,31 @@ describe('resolveInitInput', () => {
     const result = await resolveInitInput(makeArgs({ initInput: 'some text' }));
     expect(result).toBe('some text');
   });
+
+  it('reads @file with absolute path', async () => {
+    const absPath = join(tmpDir, 'absolute-prd.md');
+    await writeFile(absPath, 'absolute path content');
+
+    // Absolute paths are resolved relative to projectDir, so we need
+    // to use the relative form or the absolute form via @
+    const result = await resolveInitInput(makeArgs({ initInput: `@${absPath}` }));
+
+    expect(result).toBe('absolute path content');
+  });
+
+  it('preserves whitespace in raw text input', async () => {
+    const input = '  build a todo app with spaces  ';
+    const result = await resolveInitInput(makeArgs({ initInput: input }));
+
+    expect(result).toBe(input);
+  });
+
+  it('reads large file content from @file', async () => {
+    const largeContent = 'x'.repeat(10000) + '\n# PRD\nDescription here';
+    await writeFile(join(tmpDir, 'large.md'), largeContent);
+
+    const result = await resolveInitInput(makeArgs({ initInput: '@large.md' }));
+
+    expect(result).toBe(largeContent);
+  });
 });
