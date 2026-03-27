@@ -85,6 +85,59 @@ export interface ParsedPlan {
   raw: string;
 }
 
+// ─── Init command types ──────────────────────────────────────────────────────
+
+/**
+ * JSON output from `gsd-tools.cjs init new-project`.
+ * Describes project state and model configuration for the init workflow.
+ */
+export interface InitNewProjectInfo {
+  /** Model resolved for the gsd-project-researcher agent. */
+  researcher_model: string;
+  /** Model resolved for the gsd-research-synthesizer agent. */
+  synthesizer_model: string;
+  /** Model resolved for the gsd-roadmapper agent. */
+  roadmapper_model: string;
+
+  /** Whether docs should be committed after generation. */
+  commit_docs: boolean;
+
+  /** Whether .planning/PROJECT.md already exists. */
+  project_exists: boolean;
+  /** Whether a .planning/codebase directory exists. */
+  has_codebase_map: boolean;
+  /** Whether .planning/ directory exists at all. */
+  planning_exists: boolean;
+
+  /** Whether source code files were detected in the project. */
+  has_existing_code: boolean;
+  /** Whether a package manifest (package.json, Cargo.toml, etc.) was found. */
+  has_package_file: boolean;
+  /** True when existing code or a package manifest is present. */
+  is_brownfield: boolean;
+  /** True when brownfield but no codebase map exists yet. */
+  needs_codebase_map: boolean;
+
+  /** Whether a .git directory exists. */
+  has_git: boolean;
+
+  /** Whether Brave Search API key is available. */
+  brave_search_available: boolean;
+  /** Whether Firecrawl API key is available. */
+  firecrawl_available: boolean;
+  /** Whether Exa Search API key is available. */
+  exa_search_available: boolean;
+
+  /** Relative path to PROJECT.md (always '.planning/PROJECT.md'). */
+  project_path: string;
+
+  /** Absolute project root path (injected by withProjectRoot). */
+  project_root?: string;
+
+  /** Allow additional fields from gsd-tools evolution. */
+  [key: string]: unknown;
+}
+
 // ─── Session & execution types ───────────────────────────────────────────────
 
 /**

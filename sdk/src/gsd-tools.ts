@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { PhaseOpInfo, PhasePlanIndex, RoadmapAnalysis } from './types.js';
+import type { InitNewProjectInfo, PhaseOpInfo, PhasePlanIndex, RoadmapAnalysis } from './types.js';
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -211,5 +211,22 @@ export class GSDTools {
   async phasePlanIndex(phaseNumber: string): Promise<PhasePlanIndex> {
     const result = await this.exec('phase-plan-index', [phaseNumber]);
     return result as PhasePlanIndex;
+  }
+
+  /**
+   * Query new-project init state from gsd-tools.cjs `init new-project`.
+   * Returns project metadata, model configs, brownfield detection, etc.
+   */
+  async initNewProject(): Promise<InitNewProjectInfo> {
+    const result = await this.exec('init', ['new-project']);
+    return result as InitNewProjectInfo;
+  }
+
+  /**
+   * Set a config value via gsd-tools.cjs `config-set`.
+   * Handles type coercion (booleans, numbers, JSON) on the gsd-tools side.
+   */
+  async configSet(key: string, value: string): Promise<unknown> {
+    return this.exec('config-set', [key, value]);
   }
 }

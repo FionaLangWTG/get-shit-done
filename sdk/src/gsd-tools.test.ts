@@ -263,4 +263,104 @@ describe('GSDTools', () => {
       expect((result as unknown[]).length).toBe(5000);
     });
   });
+
+  // ─── initNewProject() tests ────────────────────────────────────────────
+
+  describe('initNewProject()', () => {
+    it('calls init new-project and returns typed result', async () => {
+      const mockResult = {
+        researcher_model: 'claude-sonnet-4-6',
+        synthesizer_model: 'claude-sonnet-4-6',
+        roadmapper_model: 'claude-sonnet-4-6',
+        commit_docs: true,
+        project_exists: false,
+        has_codebase_map: false,
+        planning_exists: false,
+        has_existing_code: false,
+        has_package_file: false,
+        is_brownfield: false,
+        needs_codebase_map: false,
+        has_git: true,
+        brave_search_available: false,
+        firecrawl_available: false,
+        exa_search_available: false,
+        project_path: '.planning/PROJECT.md',
+        project_root: '/tmp/test',
+      };
+
+      const scriptPath = await createScript(
+        'init-new-project.cjs',
+        `
+        const args = process.argv.slice(2);
+        if (args[0] === 'init' && args[1] === 'new-project' && args.includes('--raw')) {
+          process.stdout.write(JSON.stringify(${JSON.stringify(mockResult)}));
+        } else {
+          process.stderr.write('unexpected args: ' + args.join(' '));
+          process.exit(1);
+        }
+        `,
+      );
+
+      const tools = new GSDTools({ projectDir: tmpDir, gsdToolsPath: scriptPath });
+      const result = await tools.initNewProject();
+
+      expect(result.researcher_model).toBe('claude-sonnet-4-6');
+      expect(result.project_exists).toBe(false);
+      expect(result.has_git).toBe(true);
+      expect(result.is_brownfield).toBe(false);
+      expect(result.project_path).toBe('.planning/PROJECT.md');
+    });
+
+    it('propagates errors from gsd-tools', async () => {
+      const scriptPath = await createScript(
+        'init-fail.cjs',
+        `process.stderr.write('init failed\\n'); process.exit(1);`,
+      );
+
+      const tools = new GSDTools({ projectDir: tmpDir, gsdToolsPath: scriptPath });
+
+      await expect(tools.initNewProject()).rejects.toThrow(GSDToolsError);
+    });
+  });
+
+  // ─── configSet() tests ─────────────────────────────────────────────────
+
+  describe('configSet()', () => {
+    it('calls config-set with key and value args', async () => {
+      const scriptPath = await createScript(
+        'config-set.cjs',
+        `
+        const args = process.argv.slice(2);
+        if (args[0] === 'config-set' && args[1] === 'workflow.auto_advance' && args[2] === 'true' && args.includes('--raw')) {
+          process.stdout.write(JSON.stringify({ success: true }));
+        } else {
+          process.stderr.write('unexpected args: ' + args.join(' '));
+          process.exit(1);
+        }
+        `,
+      );
+
+      const tools = new GSDTools({ projectDir: tmpDir, gsdToolsPath: scriptPath });
+      const result = await tools.configSet('workflow.auto_advance', 'true');
+
+      expect(result).toEqual({ success: true });
+    });
+
+    it('passes string values without coercion', async () => {
+      const scriptPath = await createScript(
+        'config-set-str.cjs',
+        `
+        const args = process.argv.slice(2);
+        // config-set mode yolo --raw
+        process.stdout.write(JSON.stringify({ key: args[1], value: args[2] }));
+        `,
+      );
+
+      const tools = new GSDTools({ projectDir: tmpDir, gsdToolsPath: scriptPath });
+      const result = await tools.configSet('mode', 'yolo') as { key: string; value: string };
+
+      expect(result.key).toBe('mode');
+      expect(result.value).toBe('yolo');
+    });
+  });
 });

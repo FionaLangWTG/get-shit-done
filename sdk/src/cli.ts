@@ -20,6 +20,8 @@ import { WSTransport } from './ws-transport.js';
 export interface ParsedCliArgs {
   command: string | undefined;
   prompt: string | undefined;
+  /** For 'init' command: the raw input source (@file, text, or undefined for stdin). */
+  initInput: string | undefined;
   projectDir: string;
   wsPort: number | undefined;
   model: string | undefined;
@@ -50,9 +52,14 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
   const command = positionals[0] as string | undefined;
   const prompt = positionals.slice(1).join(' ') || undefined;
 
+  // For 'init' command, the positional after 'init' is the input source.
+  // For 'run' command, it's the prompt. Both use positionals[1+].
+  const initInput = command === 'init' ? prompt : undefined;
+
   return {
     command,
     prompt,
+    initInput,
     projectDir: values['project-dir'] as string,
     wsPort: values['ws-port'] ? Number(values['ws-port']) : undefined,
     model: values.model as string | undefined,
@@ -65,10 +72,15 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 // ─── Usage ───────────────────────────────────────────────────────────────────
 
 const USAGE = `
-Usage: gsd-sdk run "<prompt>" [options]
+Usage: gsd-sdk <command> [args] [options]
 
 Commands:
-  run <prompt>    Run a full milestone from a text prompt
+  run <prompt>          Run a full milestone from a text prompt
+  init [input]          Bootstrap a new project from a PRD or description
+                        input can be:
+                          @path/to/prd.md   Read input from a file
+                          "description"     Use text directly
+                          (empty)           Read from stdin
 
 Options:
   --project-dir <dir>   Project directory (default: cwd)
@@ -91,6 +103,62 @@ async function getVersion(): Promise<string> {
   } catch {
     return 'unknown';
   }
+}
+
+// ─── Init input resolution ───────────────────────────────────────────────────
+
+/**
+ * Resolve the init command input to a string.
+ *
+ * - `@path/to/file.md` → reads the file contents
+ * - Raw text → returns as-is
+ * - No input → reads from stdin (with TTY detection)
+ *
+ * Exported for testing.
+ */
+export async function resolveInitInput(args: ParsedCliArgs): Promise<string> {
+  const input = args.initInput;
+
+  if (input && input.startsWith('@')) {
+    // File path: strip @ prefix, resolve relative to projectDir
+    const filePath = resolve(args.projectDir, input.slice(1));
+    try {
+      return await readFile(filePath, 'utf-8');
+    } catch (err) {
+      throw new Error(`Cannot read input file "${filePath}": ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'file not found' : (err as Error).message}`);
+    }
+  }
+
+  if (input) {
+    // Raw text
+    return input;
+  }
+
+  // No input — read from stdin
+  return readStdin();
+}
+
+/**
+ * Read all data from stdin. Rejects if stdin is a TTY with no piped data.
+ */
+async function readStdin(): Promise<string> {
+  const { stdin } = process;
+
+  if (stdin.isTTY) {
+    throw new Error(
+      'No input provided. Usage:\n' +
+      '  gsd-sdk init @path/to/prd.md\n' +
+      '  gsd-sdk init "build a todo app"\n' +
+      '  cat prd.md | gsd-sdk init'
+    );
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    stdin.on('error', reject);
+  });
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -118,12 +186,35 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  if (args.command !== 'run' || !args.prompt) {
-    console.error('Error: Expected "gsd-sdk run <prompt>"');
+  if (args.command !== 'run' && args.command !== 'init') {
+    console.error('Error: Expected "gsd-sdk run <prompt>" or "gsd-sdk init [input]"');
     console.error(USAGE);
     process.exitCode = 1;
     return;
   }
+
+  if (args.command === 'run' && !args.prompt) {
+    console.error('Error: "gsd-sdk run" requires a prompt');
+    console.error(USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  // ─── Init command (input resolution only; InitRunner wiring is T03) ────────
+  if (args.command === 'init') {
+    try {
+      const input = await resolveInitInput(args);
+      console.log(`[init] Resolved input: ${input.length} chars`);
+      // TODO(T03): Wire InitRunner here
+      console.log('[init] InitRunner not yet implemented — input resolved successfully.');
+    } catch (err) {
+      console.error(`Error: ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // ─── Run command ─────────────────────────────────────────────────────────
 
   // Build GSD instance
   const gsd = new GSD({
@@ -146,7 +237,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   try {
-    const result = await gsd.run(args.prompt);
+    const result = await gsd.run(args.prompt!);
 
     // Final summary
     const status = result.success ? 'SUCCESS' : 'FAILED';
